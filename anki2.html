@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anki Clone - Sistema de Flashcards</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --secondary: #64748b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --background: #f8fafc;
+            --foreground: #1e293b;
+        }
+
+        .dark-mode {
+            --primary: #60a5fa;
+            --secondary: #94a3b8;
+            --background: #1e293b;
+            --foreground: #f1f5f9;
+        }
+
+        body {
+            background-color: var(--background);
+            color: var(--foreground);
+            transition: all 0.3s ease;
+        }
+
+        .card {
+            perspective: 1000px;
+            cursor: pointer;
+        }
+
+        .card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+
+        .card.flipped .card-inner {
+            transform: rotateY(180deg);
+        }
+
+        .card-front, .card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-back {
+            transform: rotateY(180deg);
+        }
+
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+
+        .deck-tree li {
+            position: relative;
+        }
+
+        .deck-tree li:before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -1.5rem;
+            bottom: 0;
+            width: 1px;
+            background-color: currentColor;
+            opacity: 0.3;
+        }
+
+        .deck-tree li:after {
+            content: "";
+            position: absolute;
+            top: 0.75rem;
+            left: -1.5rem;
+            width: 0.75rem;
+            height: 1px;
+            background-color: currentColor;
+            opacity: 0.3;
+        }
+
+        .deck-tree li:first-child:before {
+            top: 0.75rem;
+        }
+
+        .deck-tree li:last-child:before {
+            bottom: calc(100% - 0.75rem);
+        }
+
+        /* Animações */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-fadeIn {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* Scrollbar personalizada */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--secondary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <div class="w-64 bg-white shadow-lg border-r border-gray-200 flex flex-col dark:bg-gray-800 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <h1 class="text-xl font-bold text-blue-600 dark:text-blue-400">
+                    <i class="fas fa-brain mr-2"></i>Anki Clone
+                </h1>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4">
+                <div class="mb-6">
+                    <h2 class="text-sm font-semibold text-gray-600 uppercase mb-2 dark:text-gray-400">Decks</h2>
+                    <div id="deckTree" class="deck-tree space-y-1">
+                        <!-- Hierarquia de decks será gerada aqui -->
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <h2 class="text-sm font-semibold text-gray-600 uppercase mb-2 dark:text-gray-400">Estatísticas</h2>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span>Cards para hoje:</span>
+                            <span id="todayCount" class="font-semibold">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Cartas aprendidas:</span>
+                            <span id="learnedCount" class="font-semibold">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Taxa de acerto:</span>
+                            <span id="accuracyRate" class="font-semibold">0%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+                <button id="toggleDarkMode" class="w-full flex items-center justify-center px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg dark:bg-gray-700 dark:hover:bg-gray-600">
+                    <i class="fas fa-moon mr-2"></i>Modo Escuro
+                </button>
+            </div>
+        </div>
+
+        <!-- Conteúdo Principal -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Header -->
+            <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4 dark:bg-gray-800 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                    <h2 id="currentDeck" class="text-lg font-semibold">Selecione um Deck</h2>
+                    <div class="flex space-x-3">
+                        <button id="addDeckBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                            <i class="fas fa-plus mr-2"></i>Novo Deck
+                        </button>
+                        <button id="importBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+                            <i class="fas fa-file-import mr-2"></i>Importar
+                        </button>
+                        <button id="exportBtn" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
+                            <i class="fas fa-file-export mr-2"></i>Exportar
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Conteúdo Dinâmico -->
+            <main class="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
+                <div id="dashboardView" class="hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <div class="bg-white rounded-lg shadow p-6 dark:bg-gray-800">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-blue-100 rounded-full dark:bg-blue-900">
+                                    <i class="fas fa-clock text-blue-600 text-xl dark:text-blue-400"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Para Hoje</h3>
+                                    <p id="dueToday" class="text-2xl font-bold">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6 dark:bg-gray-800">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-green-100 rounded-full dark:bg-green-900">
+                                    <i class="fas fa-check-circle text-green-600 text-xl dark:text-green-400"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Aprendidos</h3>
+                                    <p id="totalLearned" class="text-2xl font-bold">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6 dark:bg-gray-800">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-yellow-100 rounded-full dark:bg-yellow-900">
+                                    <i class="fas fa-chart-line text-yellow-600 text-xl dark:text-yellow-400"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Taxa de Acerto</h3>
+                                    <p id="overallAccuracy" class="text-2xl font-bold">0%</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6 dark:bg-gray-800">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-red-100 rounded-full dark:bg-red-900">
+                                    <i class="fas fa-fire text-red-600 text-xl dark:text-red-400"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <h3 class="text-sm font-medium text-gray-600 dark:text-gray-400">Sequência</h3>
+                                    <p id="currentStreak" class="text-2xl font-bold">0 dias</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow p-6 dark:bg-gray-800">
+                        <h3 class="text-lg font-semibold mb-4">Próximas Revisões</h3>
+                        <div id="upcomingReviews" class="space-y-2">
+                            <p class="text-gray-500 text-center py-8">Nenhuma revisão agendada</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="reviewView" class="hidden">
+                    <div class="max-w-2xl mx-auto">
+                        <div class="bg-white rounded-lg shadow-lg overflow-hidden dark:bg-gray-800">
+                            <!-- Card de Revisão -->
+                            <div class="card h-96 cursor-pointer" onclick="flipCard()">
+                                <div class="card-inner h-full">
+                                    <div class="card-front bg-white dark:bg-gray-700 flex items-center justify-center p-8">
+                                        <div id="cardFront" class="text-center text-2xl">
+                                            <!-- Conteúdo da frente do card -->
+                                        </div>
+                                    </div>
+                                    <div class="card-back bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center p-8">
+                                        <div id="cardBack" class="text-center text-2xl">
+                                            <!-- Conteúdo do verso do card -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Botões de Resposta -->
+                            <div id="answerButtons" class="hidden p-6 bg-gray-50 dark:bg-gray-700">
+                                <div class="grid grid-cols-4 gap-4">
+                                    <button onclick="answerCard('again')" class="px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition">
+                                        <i class="fas fa-redo mr-2"></i>Again
+                                    </button>
+                                    <button onclick="answerCard('hard')" class="px-4 py-3 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition">
+                                        <i class="fas fa-exclamation mr-2"></i>Hard
+                                    </button>
+                                    <button onclick="answerCard('good')" class="px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition">
+                                        <i class="fas fa-check mr-2"></i>Good
+                                    </button>
+                                    <button onclick="answerCard('easy')" class="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                                        <i class="fas fa-smile mr-2"></i>Easy
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Progresso -->
+                            <div class="px-6 pb-4">
+                                <div class="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                    <span id="progressText">0/0</span>
+                                    <span id="cardInfo">Facilidade: 0%</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                                    <div id="progressBar" class="progress-bar h-2 rounded-full bg-blue-600" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="editorView" class="hidden">
+                    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6 dark:bg-gray-800">
+                        <h3 class="text-xl font-semibold mb-6">Editor de Cards</h3>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <div>
+                                <label class="block text-sm font-medium mb-2 dark:text-gray-300">Frente do Card</label>
+                                <div class="border rounded-lg p-4 min-h-32 bg-white dark:bg-gray-700 dark:border-gray-600">
+                                    <div id="frontEditor" contenteditable="true" class="min-h-24 outline-none"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2 dark:text-gray-300">Verso do Card</label>
+                                <div class="border rounded-lg p-4 min-h-32 bg-white dark:bg-gray-700 dark:border-gray-600">
+                                    <div id="backEditor" contenteditable="true" class="min-h-24 outline-none"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex space-x-4 mb-6">
+                            <button onclick="formatText('bold')" class="px-3 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">
+                                <i class="fas fa-bold"></i>
+                            </button>
+                            <button onclick="formatText('italic')" class="px-3 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">
+                                <i class="fas fa-italic"></i>
+                            </button>
+                            <button onclick="formatText('underline')" class="px-3 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">
+                                <i class="fas fa-underline"></i>
+                            </button>
+                            <button onclick="insertImage()" class="px-3 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">
+                                <i class="fas fa-image"></i>
+                            </button>
+                        </div>
+
+                        <div class="flex justify-end space-x-4">
+                            <button onclick="cancelEdit()" class="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+                                Cancelar
+                            </button>
+                            <button onclick="saveCard()" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                                Salvar Card
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="statsView" class="hidden">
+                    <div class="bg-white rounded-lg shadow-lg p-6 dark:bg-gray-800">
+                        <h3 class="text-xl font-semibold mb-6">Estatísticas Detalhadas</h3>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                            <div class="bg-gray-50 rounded-lg p-4 dark:bg-gray-700">
+                                <h4 class="font-semibold mb-4">Distribuição de Respostas</h4>
+                                <canvas id="answerChart" width="400" height="200"></canvas>
+                            </div>
+                            <div class="bg-gray-50 rounded-lg p-4 dark:bg-gray-700">
+                                <h4 class="font-semibold mb-4">Progresso Diário</h4>
+                                <canvas id="progressChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full table-auto">
+                                <thead>
+                                    <tr class="bg-gray-100 dark:bg-gray-700">
+                                        <th class="px-4 py-2 text-left">Data</th>
+                                        <th class="px-4 py-2 text-left">Cards Revisados</th>
+                                        <th class="px-4 py-2 text-left">Taxa de Acerto</th>
+                                        <th class="px-4 py-2 text-left">Tempo Médio</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="statsTable">
+                                    <!-- Dados das estatísticas -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modais -->
+    <div id="deckModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 dark:bg-gray-800">
+            <h3 class="text-lg font-semibold mb-4">Novo Deck</h3>
+            <input type="text" id="deckName" placeholder="Nome do Deck" class="w-full px-3 py-2 border rounded-lg mb-4 dark:bg-gray-700 dark:border-gray-600">
+            <select id="parentDeck" class="w-full px-3 py-2 border rounded-lg mb-4 dark:bg-gray-700 dark:border-gray-600">
+                <option value="">Deck Principal</option>
+            </select>
+            <div class="flex justify-end space-x-3">
+                <button onclick="closeModal('deckModal')" class="px-4 py-2 bg-gray-500 text-white rounded-lg">Cancelar</button>
+                <button onclick="saveDeck()" class="px-4 py-2 bg-blue-600 text-white rounded-lg">Salvar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sistema de Gerenciamento de Estado
+        const state = {
+            currentView: 'dashboard',
+            currentDeck: null,
+            currentCard: null,
+            isEditing: false,
+            darkMode: localStorage.getItem('darkMode') === 'true',
+            decks: JSON.parse(localStorage.getItem('decks')) || [],
+            cards: JSON.parse(localStorage.getItem('cards')) || [],
+            reviews: JSON.parse(localStorage.getItem('reviews')) || [],
+            settings: JSON.parse(localStorage.getItem('settings')) || {
+                newCardsPerDay: 20,
+                maxReviewsPerDay: 100,
+                easyBonus: 1.3,
+                hardInterval: 1.2,
+                initialEase: 2.5
+            }
+        };
+
+        // Inicialização
+        function init() {
+            setupEventListeners();
+            loadDecks();
+            updateStats();
+            applyDarkMode();
+            showView('dashboard');
+        }
+
+        // Configuração de Event Listeners
+        function setupEventListeners() {
+            document.getElementById('toggleDarkMode').addEventListener('click', toggleDarkMode);
+            document.getElementById('addDeckBtn').addEventListener('click', showDeckModal);
+            document.getElementById('importBtn').addEventListener('click', importDecks);
+            document.getElementById('exportBtn').addEventListener('click', exportDecks);
+        }
+
+        // Modo Escuro
+        function toggleDarkMode() {
+            state.darkMode = !state.darkMode;
+            localStorage.setItem('darkMode', state.darkMode);
+            applyDarkMode();
+        }
+
+        function applyDarkMode() {
+            if (state.darkMode) {
+                document.documentElement.classList.add('dark-mode');
+                document.body.classList.add('dark:bg-gray-900');
+            } else {
+                document.documentElement.classList.remove('dark-mode');
+                document.body.classList.remove('dark:bg-gray-900');
+            }
+        }
+
+        // Gerenciamento de Views
+        function showView(viewName) {
+            document.querySelectorAll('[id$="View"]').forEach(view => view.classList.add('hidden'));
+            document.getElementById(viewName + 'View').classList.remove('hidden');
+            state.currentView = viewName;
+        }
+
+        // Gerenciamento de Decks
+        function loadDecks() {
+            const deckTree = document.getElementById('deckTree');
+            deckTree.innerHTML = '';
+            
+            state.decks.forEach(deck => {
+                if (!deck.parentId) {
+                    renderDeckItem(deck, deckTree);
+                }
+            });
+
+            updateDeckSelect();
+        }
+
+        function renderDeckItem(deck, parentElement, level = 0) {
+            const li = document.createElement('li');
+            li.className = `pl-${level * 4} py-1`;
+            
+            const button = document.createElement('button');
+            button.className = 'flex items-center w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700';
+            button.innerHTML = `
+                <i class="fas fa-folder mr-2 text-yellow-500"></i>
+                ${deck.name}
+                <span class="ml-auto text-sm text-gray-500">${getDeckCardCount(deck.id)}</span>
+            `;
+            
+            button.addEventListener('click', () => selectDeck(deck.id));
+            
+            li.appendChild(button);
+            parentElement.appendChild(li);
+
+            // Render subdecks
+            const subdecks = state.decks.filter(d => d.parentId === deck.id);
+            if (subdecks.length > 0) {
+                const ul = document.createElement('ul');
+                subdecks.forEach(subdeck => {
+                    renderDeckItem(subdeck, ul, level + 1);
+                });
+                li.appendChild(ul);
+            }
+        }
+
+        function getDeckCardCount(deckId) {
+            return state.cards.filter(card => card.deckId === deckId).length;
+        }
+
+        function selectDeck(deckId) {
+            state.currentDeck = deckId;
+            const deck = state.decks.find(d => d.id === deckId);
+            document.getElementById('currentDeck').textContent = deck.name;
+            showView('dashboard');
+            updateDeckStats();
+        }
+
+        // Modal de Decks
+        function showDeckModal() {
+            document.getElementById('deckModal').classList.remove('hidden');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function saveDeck() {
+            const name = document.getElementById('deckName').value.trim();
+            const parentId = document.getElementById('parentDeck').value || null;
+            
+            if (name) {
+                const newDeck = {
+                    id: Date.now().toString(),
+                    name,
+                    parentId,
+                    createdAt: new Date().toISOString()
+                };
+                
+                state.decks.push(newDeck);
+                saveState();
+                loadDecks();
+                closeModal('deckModal');
+            }
+        }
+
+        function updateDeckSelect() {
+            const select = document.getElementById('parentDeck');
+            select.innerHTML = '<option value="">Deck Principal</option>';
+            
+            state.decks.forEach(deck => {
+                const option = document.createElement('option');
+                option.value = deck.id;
+                option.textContent = deck.name;
+                select.appendChild(option);
+            });
+        }
+
+        // Sistema SRS (Spaced Repetition)
+        function calculateNextReview(card, answer) {
+            const now = new Date();
+            let nextInterval = 0;
+            let easeFactor = card.easeFactor || state.settings.initialEase;
+            
+            switch(answer) {
+                case 'again':
+                    card.lapses = (card.lapses || 0) + 1;
+                    nextInterval = 1; // 1 minute for learning
+                    easeFactor = Math.max(1.3, easeFactor - 0.2);
+                    break;
+                case 'hard':
+                    nextInterval = card.interval ? card.interval * state.settings.hardInterval : 1;
+                    easeFactor = Math.max(1.3, easeFactor - 0.15);
+                    break;
+                case 'good':
+                    if (!card.interval) {
+                        nextInterval = 1; // First review
+                    } else {
+                        nextInterval = card.interval * easeFactor;
+                    }
+                    break;
+                case 'easy':
+                    nextInterval = card.interval ? card.interval * easeFactor * state.settings.easyBonus : 4;
+                    easeFactor += 0.15;
+                    break;
+            }
+            
+            // Convert interval to days and ensure minimum interval
+            nextInterval = Math.max(1, Math.floor(nextInterval));
+            
+            const nextReview = new Date(now.getTime() + nextInterval * 24 * 60 * 60 * 1000);
+            
+            return {
+                nextInterval,
+                easeFactor,
+                nextReview: nextReview.toISOString()
+            };
+        }
+
+        // Revisão de Cards
+        function startReview() {
+            if (!state.currentDeck) return;
+            
+            const dueCards = state.cards.filter(card => 
+                card.deckId === state.currentDeck && 
+                (!card.nextReview || new Date(card.nextReview) <= new Date())
+            );
+            
+            if (dueCards.length === 0) {
+                alert('Nenhum card para revisar hoje!');
+                return;
+            }
+            
+            state.reviewSession = {
+                cards: dueCards,
+                currentIndex: 0,
+                correct: 0,
+                total: dueCards.length
+            };
+            
+            showNextCard();
+            showView('review');
+        }
+
+        function showNextCard() {
+            if (state.reviewSession.currentIndex >= state.reviewSession.cards.length) {
+                finishReview();
+                return;
+            }
+            
+            state.currentCard = state.reviewSession.cards[state.reviewSession.currentIndex];
+            document.getElementById('cardFront').innerHTML = state.currentCard.front;
+            document.getElementById('cardBack').innerHTML = state.currentCard.back;
+            document.getElementById('answerButtons').classList.add('hidden');
+            
+            updateProgress();
+        }
+
+        function flipCard() {
+            document.querySelector('.card').classList.add('flipped');
+            document.getElementById('answerButtons').classList.remove('hidden');
+        }
+
+        function answerCard(answer) {
+            const result = calculateNextReview(state.currentCard, answer);
+            
+            // Update card
+            state.currentCard.interval = result.nextInterval;
+            state.currentCard.easeFactor = result.easeFactor;
+            state.currentCard.nextReview = result.nextReview;
+            state.currentCard.lastReview = new Date().toISOString();
+            
+            if (answer === 'good' || answer === 'easy') {
+                state.reviewSession.correct++;
+            }
+            
+            // Save review history
+            state.reviews.push({
+                cardId: state.currentCard.id,
+                answer,
+                time: new Date().toISOString(),
+                ease: state.currentCard.easeFactor
+            });
+            
+            state.reviewSession.currentIndex++;
+            saveState();
+            showNextCard();
+        }
+
+        function updateProgress() {
+            const progress = (state.reviewSession.currentIndex / state.reviewSession.total) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('progressText').textContent = 
+                `${state.reviewSession.currentIndex + 1}/${state.reviewSession.total}`;
+            
+            const cardInfo = `Facilidade: ${Math.round((state.currentCard.easeFactor || 2.5) * 100)}%`;
+            document.getElementById('cardInfo').textContent = cardInfo;
+        }
+
+        function finishReview() {
+            const accuracy = (state.reviewSession.correct / state.reviewSession.total) * 100;
+            alert(`Revisão concluída! Acerto: ${accuracy.toFixed(1)}%`);
+            showView('dashboard');
+            updateStats();
+        }
+
+        // Editor de Cards
+        function showCardEditor(card = null) {
+            state.isEditing = !!card;
+            state.currentCard = card;
+            
+            if (card) {
+                document.getElementById('frontEditor').innerHTML = card.front;
+                document.getElementById('backEditor').innerHTML = card.back;
+            } else {
+                document.getElementById('frontEditor').innerHTML = '';
+                document.getElementById('backEditor').innerHTML = '';
+            }
+            
+            showView('editor');
+        }
+
+        function formatText(format) {
+            document.execCommand(format, false, null);
+        }
+
+        function insertImage() {
+            const url = prompt('URL da imagem:');
+            if (url) {
+                document.execCommand('insertHTML', false, `<img src="${url}" alt="Imagem educacional para flashcards" class="max-w-full h-auto rounded">`);
+            }
+        }
+
+        function saveCard() {
+            const front = document.getElementById('frontEditor').innerHTML;
+            const back = document.getElementById('backEditor').innerHTML;
+            
+            if (!front.trim() || !back.trim()) {
+                alert('Ambos os lados do card devem conter conteúdo!');
+                return;
+            }
+            
+            if (state.isEditing) {
+                // Update existing card
+                state.currentCard.front = front;
+                state.currentCard.back = back;
+                state.currentCard.updatedAt = new Date().toISOString();
+            } else {
+                // Create new card
+                const newCard = {
+                    id: Date.now().toString(),
+                    deckId: state.currentDeck,
+                    front,
+                    back,
+                    createdAt: new Date().toISOString(),
+                    easeFactor: state.settings.initialEase,
+                    lapses: 0,
+                    interval: null,
+                    nextReview: null
+                };
+                state.cards.push(newCard);
+            }
+            
+            saveState();
+            cancelEdit();
+        }
+
+        function cancelEdit() {
+            showView('dashboard');
+        }
+
+        // Estatísticas
+        function updateStats() {
+            const totalCards = state.cards.length;
+            const dueToday = state.cards.filter(card => 
+                !card.nextReview || new Date(card.nextReview) <= new Date()
+            ).length;
+            
+            const learnedCards = state.cards.filter(card => card.interval && card.interval > 1).length;
+            const totalReviews = state.reviews.length;
+            const correctReviews = state.reviews.filter(r => r.answer === 'good' || r.answer === 'easy').length;
+            const accuracy = totalReviews > 0 ? (correctReviews / totalReviews) * 100 : 0;
+            
+            // Update UI
+            document.getElementById('dueToday').textContent = dueToday;
+            document.getElementById('totalLearned').textContent = learnedCards;
+            document.getElementById('overallAccuracy').textContent = accuracy.toFixed(1) + '%';
+            document.getElementById('todayCount').textContent = dueToday;
+            document.getElementById('learnedCount').textContent = learnedCards;
+            document.getElementById('accuracyRate').textContent = accuracy.toFixed(1) + '%';
+            
+            // Calculate streak
+            const today = new Date().toDateString();
+            const reviewDates = [...new Set(state.reviews.map(r => new Date(r.time).toDateString()))];
+            reviewDates.sort((a, b) => new Date(b) - new Date(a));
+            
+            let streak = 0;
+            let currentDate = new Date();
+            
+            while (reviewDates.includes(currentDate.toDateString())) {
+                streak++;
+                currentDate.setDate(currentDate.getDate() - 1);
+            }
+            
+            document.getElementById('currentStreak').textContent = streak + ' dias';
+        }
+
+        function updateDeckStats() {
+            if (!state.currentDeck) return;
+            
+            const deckCards = state.cards.filter(card => card.deckId === state.currentDeck);
+            const dueToday = deckCards.filter(card => 
+                !card.nextReview || new Date(card.nextReview) <= new Date()
+            ).length;
+            
+            document.getElementById('dueToday').textContent = dueToday;
+        }
+
+        // Importação/Exportação
+        function exportDecks() {
+            const data = {
+                decks: state.decks,
+                cards: state.cards,
+                reviews: state.reviews,
+                settings: state.settings,
+                exportDate: new Date().toISOString(),
+                version: '1.0'
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `anki-clone-backup-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importDecks() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = (event) => {
+                    try {
+                        const data = JSON.parse(event.target.result);
+                        
+                        if (confirm('Isso substituirá todos os dados atuais. Continuar?')) {
+                            state.decks = data.decks || [];
+                            state.cards = data.cards || [];
+                            state.reviews = data.reviews || [];
+                            state.settings = data.settings || state.settings;
+                            
+                            saveState();
+                            loadDecks();
+                            updateStats();
+                            alert('Dados importados com sucesso!');
+                        }
+                    } catch (error) {
+                        alert('Erro ao importar arquivo: ' + error.message);
+                    }
+                };
+                
+                reader.readAsText(file);
+            };
+            
+            input.click();
+        }
+
+        // Persistência
+        function saveState() {
+            localStorage.setItem('decks', JSON.stringify(state.decks));
+            localStorage.setItem('cards', JSON.stringify(state.cards));
+            localStorage.setItem('reviews', JSON.stringify(state.reviews));
+            localStorage.setItem('settings', JSON.stringify(state.settings));
+        }
+
+        // Inicializar a aplicação
+        document.addEventListener('DOMContentLoaded', init);
+
+        // Expor funções globais para os botões HTML
+        window.flipCard = flipCard;
+        window.answerCard = answerCard;
+        window.formatText = formatText;
+        window.insertImage = insertImage;
+        window.saveCard = saveCard;
+        window.cancelEdit = cancelEdit;
+        window.closeModal = closeModal;
+        window.saveDeck = saveDeck;
+        window.showDeckModal
